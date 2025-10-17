@@ -7,7 +7,7 @@ from sklearn.cluster import KMeans, DBSCAN
 from sklearn.metrics import silhouette_score
 from typing import Optional, Tuple
 from utils import group_columns_by_type
-from model.preprocessing import preprocessing_numerical, preprocessing_categorical
+from model.ahp import preprocessing_numerical, preprocessing_categorical
 
 
 def get_pca_contribution_table(
