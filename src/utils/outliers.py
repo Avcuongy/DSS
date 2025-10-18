@@ -2,7 +2,6 @@ import pandas as pd
 import numpy as np
 from scipy import stats
 
-
 def detect_outliers_by_iqr(df: pd.DataFrame, cols: list[str]) -> dict:
     """
     Detects outliers in specified columns of a DataFrame using the IQR method.

@@ -1,6 +1,5 @@
 import pandas as pd
 
-
 def convert_column_to_numeric(df: pd.DataFrame, col: str, errors: str = "coerce"):
     """
     Convert a single column in a DataFrame to numeric type.

@@ -7,7 +7,6 @@ from sklearn.cluster import KMeans, DBSCAN
 from sklearn.metrics import silhouette_score
 from typing import Optional, Tuple
 from utils import group_columns_by_type
-from model.ahp import preprocessing_numerical, preprocessing_categorical
 
 
 def get_pca_contribution_table(
@@ -77,78 +76,3 @@ def get_mca_contribution_table(mca_model: MCA, percent: bool = False) -> pd.Data
         return df_var_contrib.round(2).astype(str) + " %"
     else:
         return df_var_contrib
-
-
-def run_kmeans_clustering(
-    df: pd.DataFrame, cluster_range: Optional[list] = None
-) -> pd.DataFrame:
-    """
-    Perform KMeans clustering on a raw DataFrame (not preprocessed).
-    Automatically preprocesses numerical and categorical features,
-    finds the best number of clusters using silhouette score,
-    and returns the original DataFrame with cluster labels.
-
-    Args:
-        df (pd.DataFrame): Original raw DataFrame (unprocessed)
-        cluster_range (list, optional): List of k values to try (default: range(2, 10))
-
-    Returns:
-        pd.DataFrame: Cluster assignment for each observation.
-    """
-    df_for_cluster = df.copy()
-
-    num_cols, cate_cols, _ = group_columns_by_type(df_for_cluster, display_info=False)
-    df_num = df_for_cluster[num_cols]
-    df_cate = df_for_cluster[cate_cols]
-
-    if num_cols:
-        df_num_pre = preprocessing_numerical(df_num, num_cols)
-    else:
-        df_num_pre = pd.DataFrame()
-
-    if cate_cols:
-        df_cate_pre = preprocessing_categorical(df_cate, nominal_cols=cate_cols)
-    else:
-        df_cate_pre = pd.DataFrame()
-
-    df_cluster = pd.concat([df_num_pre, df_cate_pre], axis=1)
-
-    range_n_clusters = cluster_range or list(range(2, 10))
-    silhouette_scores = []
-
-    for k in range_n_clusters:
-        kmeans = KMeans(n_clusters=k, random_state=42)
-        labels = kmeans.fit_predict(df_cluster)
-        silhouette_scores.append(silhouette_score(df_cluster, labels))
-
-    best_k = range_n_clusters[np.argmax(silhouette_scores)]
-    kmeans_best = KMeans(n_clusters=best_k, random_state=42)
-    kmeans_labels = kmeans_best.fit_predict(df_cluster)
-    silhouette_kmeans = silhouette_score(df_cluster, kmeans_labels)
-
-    print(f"KMeans optimization:")
-    print(f"- Optimal number of clusters: {best_k}")
-    print(f"- Silhouette Score: {silhouette_kmeans:.3f}")
-
-    X_2d = PCA(n_components=2).fit_transform(df_cluster)
-    plt.figure(figsize=(15, 6))
-    scatter = plt.scatter(
-        X_2d[:, 0], X_2d[:, 1], c=kmeans_labels, cmap="coolwarm", s=50
-    )
-
-    centers_2d = (
-        PCA(n_components=2).fit(df_cluster).transform(kmeans_best.cluster_centers_)
-    )
-    plt.scatter(
-        centers_2d[:, 0], centers_2d[:, 1], c="red", s=150, marker="o", label="Centroid"
-    )
-
-    plt.title(f"KMeans Clustering (k = {best_k})")
-    plt.legend(title="Cluster")
-    plt.grid(True)
-    plt.show()
-
-    df_result = df.copy()
-    df_result["cluster"] = kmeans_labels
-
-    return df_result[["cluster"]]
