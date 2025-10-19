@@ -1,17 +1,16 @@
+from typing import List
+
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-from prince import MCA
-from sklearn.decomposition import PCA
-from sklearn.cluster import KMeans, DBSCAN
-from sklearn.metrics import silhouette_score
-from typing import Optional, Tuple
-from utils import group_columns_by_type
 
+from prince import MCA
+
+from sklearn.decomposition import PCA
 
 def get_pca_contribution_table(
     pca_model: PCA,
-    variable_names: list[str],
+    variable_names: List[str],
     percent: bool = False,
 ) -> pd.DataFrame:
     """
