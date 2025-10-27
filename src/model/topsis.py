@@ -2,7 +2,6 @@ import numpy as np
 import pandas as pd
 from typing import List, Literal
 
-
 class TOPSIS:
     """
     TOPSIS (Technique for Order of Preference by Similarity to Ideal Solution) 
@@ -259,39 +258,12 @@ class TOPSIS:
         })
         print(weights_df.to_string(index=False))
         
-        print(f"\n🎯 Ideal Solutions:")
+        print(f"\nIdeal Solutions:")
         ideal_df = self.get_ideal_solutions()
         print(ideal_df.to_string(index=False))
         
-        print(f"\n🏆 Top 5 Rankings:")
+        print(f"\nTop 5 Rankings:")
         rankings = self.get_rankings().head()
         print(rankings.to_string())
         
         print("\n" + "=" * 80)
-
-
-if __name__ == "__main__":
-    # Example usage
-    data = {
-        'Alternative': ['A1', 'A2', 'A3', 'A4'],
-        'Cost': [250, 200, 300, 275],
-        'Quality': [8, 7, 9, 8],
-        'Delivery': [5, 6, 4, 5],
-        'Service': [7, 8, 6, 7]
-    }
-    df = pd.DataFrame(data)
-    
-    # Initialize TOPSIS
-    topsis = TOPSIS(
-        df=df,
-        cols=['Cost', 'Quality', 'Delivery', 'Service'],
-        weights=[0.3, 0.3, 0.2, 0.2],
-        impacts=['-', '+', '+', '+']  # Cost is negative, others are positive
-    )
-    
-    # Get solution
-    solution = topsis.get_solution(target_col='Alternative')
-    print(solution)
-    
-    # Print summary
-    topsis.print_summary()

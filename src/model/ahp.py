@@ -2,7 +2,6 @@ import numpy as np
 import pandas as pd
 from typing import Literal, List
 
-
 class AHP:
     """
     Analytic Hierarchy Process (AHP) class for multi-criteria decision making.
