@@ -235,3 +235,6 @@ class AHP:
                 print("Matrix is inconsistent (CR >= 0.1) - Review pairwise comparisons")
         
         print("=" * 60)
+        
+if __name__ == "__main__":
+    pass
