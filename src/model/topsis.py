@@ -1,23 +1,44 @@
 import numpy as np
 import pandas as pd
 
-
 class TOPSIS:
     """
-    Triển khai phương pháp TOPSIS (Technique for Order of Preference by Similarity
-    to Ideal Solution) kết hợp với phương pháp Entropy để xác định trọng số.
+    Lớp triển khai phương pháp ra quyết định đa tiêu chí TOPSIS (Technique for
+    Order of Preference by Similarity to Ideal Solution), kết hợp với phương pháp 
+    Entropy để xác định trọng số tiêu chí.
+
+    Phương pháp TOPSIS giúp lựa chọn phương án tối ưu nhất bằng cách xác định 
+    mức độ gần gũi của từng phương án với giải pháp lý tưởng dương (tốt nhất) 
+    và xa nhất với giải pháp lý tưởng âm (xấu nhất).
+
+    Attributes:
+        df (pd.DataFrame): Ma trận quyết định ban đầu, trong đó:
+            - Index: tên các phương án (ví dụ: nhà cung cấp).
+            - Columns: tên các tiêu chí đánh giá.
+        criteria_types (dict): Kiểu tối ưu của từng tiêu chí. 
+            Key = tên tiêu chí, Value = "max" (càng lớn càng tốt) hoặc "min" (càng nhỏ càng tốt).
+        norm_df (pd.DataFrame | None): Ma trận quyết định đã được chuẩn hóa.
+        weights (pd.Series | None): Trọng số các tiêu chí tính theo phương pháp Entropy.
+        weighted_norm (pd.DataFrame | None): Ma trận chuẩn hóa có trọng số.
+        Ci_df (pd.DataFrame | None): Bảng hệ số Ci và xếp hạng các phương án.
     """
 
     def __init__(self, df, criteria_types):
         """
-        Khởi tạo đối tượng TOPSIS.
+        Khởi tạo đối tượng TOPSIS với dữ liệu và loại tiêu chí.
 
         Args:
-            df (pd.DataFrame): DataFrame dữ liệu, với các phương án (hàng)
-                               và các tiêu chí (cột).
-            criteria_types (dict): Từ điển xác định hướng của tiêu chí.
-                                   Key là tên tiêu chí (str),
-                                   Value là 'max' (lợi ích) hoặc 'min' (chi phí).
+            df (pd.DataFrame): DataFrame chứa dữ liệu đầu vào, trong đó index là tên các phương án.
+            criteria_types (dict): Từ điển chỉ rõ loại tiêu chí ("max" hoặc "min").
+
+        Example:
+            >>> data = pd.DataFrame({
+            ...     'Giá': [250, 300, 200],
+            ...     'Chất lượng': [7, 9, 8],
+            ...     'Dịch vụ': [8, 7, 9]
+            ... }, index=['A', 'B', 'C'])
+            >>> types = {'Giá': 'min', 'Chất lượng': 'max', 'Dịch vụ': 'max'}
+            >>> model = TOPSIS(data, types)
         """
         self.df = df.astype(float)
         self.criteria_types = criteria_types
@@ -29,15 +50,19 @@ class TOPSIS:
 
     def normalize(self):
         """
-        Chuẩn hóa ma trận quyết định theo chuẩn Euclid (Vector Normalization).
-
-        Công thức: $r_{ij} = x_{ij} / \sqrt{\sum_{i=1}^{m} x_{ij}^2}$
-        Kết quả được lưu vào `self.norm_df`.
+        Chuẩn hóa ma trận quyết định theo chuẩn Euclid (vector normalization).
 
         Returns:
-            pd.DataFrame: DataFrame đã được chuẩn hóa.
+            pd.DataFrame: Ma trận chuẩn hóa (norm_df), trong đó mỗi cột được chia
+            cho căn bậc hai của tổng bình phương các phần tử trong cột.
+
+        Formula:
+            r_ij = x_ij / sqrt(sum(x_ij^2))
+
+        Raises:
+            ValueError: Nếu dữ liệu đầu vào không phải kiểu số.
         """
-        norm_df = pd.DataFrame()
+        norm_df = pd.DataFrame(index=self.df.index)
         for col in self.df.columns:
             denom = np.sqrt((self.df[col] ** 2).sum())
             norm_df[col] = self.df[col] / denom if denom != 0 else 0
@@ -46,43 +71,43 @@ class TOPSIS:
 
     def calculate_entropy_weights(self):
         """
-        Tính trọng số khách quan của các tiêu chí bằng phương pháp Entropy.
+        Tính trọng số các tiêu chí theo phương pháp Entropy.
 
-        Kết quả được lưu vào `self.weights`.
+        Quá trình gồm:
+            1. Chuẩn hóa dữ liệu (p_ij).
+            2. Tính entropy (E_j) của từng tiêu chí.
+            3. Xác định độ sai biệt (G_j = 1 - E_j).
+            4. Chuẩn hóa trọng số: w_j = G_j / sum(G_j)
 
         Returns:
-            pd.Series: Series chứa trọng số của mỗi tiêu chí.
+            pd.Series: Trọng số các tiêu chí (weights).
 
         Raises:
-            Exception: Nếu dữ liệu chưa được chuẩn hóa (chưa chạy `normalize()`).
+            Exception: Nếu dữ liệu chưa được chuẩn hóa (norm_df = None).
         """
         if self.norm_df is None:
-            raise Exception(
-                "Phải chuẩn hóa dữ liệu (normalize) trước khi tính trọng số."
-            )
-
-        # Tính pij (phân bố xác suất)
+            raise Exception("Phải chuẩn hóa dữ liệu (normalize) trước khi tính trọng số.")
+        
         pij = self.norm_df.div(self.norm_df.sum(axis=0), axis=1).replace(0, 1e-12)
         m = self.norm_df.shape[0]
+
         Ej = (-1 / np.log(m) * (pij * np.log(pij)).sum(axis=0)).values
         Gj = 1 - Ej
         aj = Gj / Gj.sum()
+
         self.weights = pd.Series(aj, index=self.norm_df.columns)
         return self.weights
 
     def weighted_normalize(self):
         """
-        Tạo ma trận quyết định chuẩn hóa có trọng số.
-
-        Nhân ma trận chuẩn hóa ($r_{ij}$) với trọng số Entropy ($w_j$).
-        Công thức: $v_{ij} = r_{ij} \times w_j$
-        Kết quả được lưu vào `self.weighted_norm`.
+        Tạo ma trận chuẩn hóa có trọng số bằng cách nhân từng cột của ma trận 
+        chuẩn hóa với trọng số tương ứng.
 
         Returns:
-            pd.DataFrame: DataFrame chuẩn hóa đã nhân trọng số.
+            pd.DataFrame: Ma trận chuẩn hóa có trọng số (weighted_norm).
 
         Raises:
-            Exception: Nếu chưa chuẩn hóa hoặc chưa tính trọng số.
+            Exception: Nếu chưa tính chuẩn hóa hoặc trọng số.
         """
         if self.norm_df is None or self.weights is None:
             raise Exception("Phải chuẩn hóa và tính trọng số trước.")
@@ -92,48 +117,38 @@ class TOPSIS:
 
     def calculate_Ci_and_ranking(self):
         """
-        Tính hệ số gần với giải pháp lý tưởng ($C_i$) và xếp hạng các phương án.
+        Tính hệ số gần với giải pháp lý tưởng (Ci) và xếp hạng các phương án.
 
-        Xác định giải pháp lý tưởng (PIS, $A^+$) và phi lý tưởng (NIS, $A^-$),
-        tính khoảng cách ($D^+, D^-$) và cuối cùng là điểm $C_i$.
-        Công thức: $C_i = D_i^- / (D_i^+ + D_i^-)$
-        Kết quả được lưu vào `self.Ci_df`.
+        Các bước:
+            1. Xác định tập tiêu chí cần tối đa hóa (J+) và tối thiểu hóa (J−).
+            2. Xác định giải pháp lý tưởng dương (A+) và âm (A−).
+            3. Tính khoảng cách đến A+ (D+) và A− (D−).
+            4. Tính hệ số gần gũi Ci = D− / (D+ + D−).
+            5. Xếp hạng theo Ci giảm dần.
 
         Returns:
-            pd.DataFrame: DataFrame chứa cột 'Ci' (điểm) và 'Ranking' (thứ hạng),
-                          đã được sắp xếp theo thứ hạng.
+            pd.DataFrame: Bảng gồm các cột:
+                - 'Ci': Hệ số gần với lý tưởng.
+                - 'Ranking': Thứ hạng (1 = tốt nhất).
 
         Raises:
-            Exception: Nếu chưa tính ma trận chuẩn hóa trọng số.
+            Exception: Nếu chưa tính ma trận chuẩn hóa có trọng số.
         """
         if self.weighted_norm is None:
             raise Exception("Phải tính ma trận chuẩn hóa trọng số trước.")
 
         weighted_norm = self.weighted_norm
-
         J_plus = [c for c, t in self.criteria_types.items() if t == "max"]
         J_minus = [c for c, t in self.criteria_types.items() if t == "min"]
 
-        A_plus = pd.Series(
-            {
-                col: (
-                    weighted_norm[col].max()
-                    if col in J_plus
-                    else weighted_norm[col].min()
-                )
-                for col in weighted_norm.columns
-            }
-        )
-        A_minus = pd.Series(
-            {
-                col: (
-                    weighted_norm[col].min()
-                    if col in J_plus
-                    else weighted_norm[col].max()
-                )
-                for col in weighted_norm.columns
-            }
-        )
+        A_plus = pd.Series({
+            col: (weighted_norm[col].max() if col in J_plus else weighted_norm[col].min())
+            for col in weighted_norm.columns
+        })
+        A_minus = pd.Series({
+            col: (weighted_norm[col].min() if col in J_plus else weighted_norm[col].max())
+            for col in weighted_norm.columns
+        })
 
         D_plus = np.sqrt(((weighted_norm - A_plus) ** 2).sum(axis=1))
         D_minus = np.sqrt(((weighted_norm - A_minus) ** 2).sum(axis=1))
@@ -141,36 +156,10 @@ class TOPSIS:
         Ci = D_minus / (D_plus + D_minus)
         rank = Ci.rank(ascending=False, method="min").astype(int)
 
-        self.Ci_df = pd.DataFrame({"Ci": Ci, "Ranking": rank}).sort_values(
-            by="Ci", ascending=False
-        )
+        self.Ci_df = pd.DataFrame({
+            "Supplier": self.df.index,
+            "Ci": Ci,
+            "Ranking": rank
+        }).set_index("Supplier").sort_values(by="Ci", ascending=False)
+
         return self.Ci_df
-
-    # Các hàm in kết quả theo yêu cầu (có thể gọi riêng biệt)
-    def print_normalization(self):
-        """In ma trận quyết định đã chuẩn hóa."""
-        if self.norm_df is None:
-            self.normalize()
-        print("Ma trận quyết định sau khi chuẩn hóa:")
-        print(self.norm_df)
-
-    def print_entropy_weights(self):
-        """In trọng số các tiêu chí theo Entropy."""
-        if self.weights is None:
-            self.calculate_entropy_weights()
-        print("Trọng số các tiêu chí theo Entropy:")
-        print(self.weights)
-
-    def print_weighted_normalize(self):
-        """In ma trận chuẩn hóa có trọng số."""
-        if self.weighted_norm is None:
-            self.weighted_normalize()
-        print("Ma trận chuẩn hóa có trọng số:")
-        print(self.weighted_norm)
-
-    def print_Ci_ranking(self):
-        """In bảng kết quả Ci và xếp hạng cuối cùng."""
-        if self.Ci_df is None:
-            self.calculate_Ci_and_ranking()
-        print("Bảng kết quả Ci và xếp hạng:")
-        print(self.Ci_df)
