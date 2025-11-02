@@ -1,269 +1,176 @@
 import numpy as np
 import pandas as pd
-from typing import List, Literal
+
 
 class TOPSIS:
     """
-    TOPSIS (Technique for Order of Preference by Similarity to Ideal Solution) 
-    class for multi-criteria decision making.
-    
-    Args:
-        df (pd.DataFrame): Input dataframe containing the data
-        cols (List[str]): List of column names to be used in TOPSIS analysis
-        weights (List[float], optional): Weights for each criterion (must sum to 1)
-        impacts (List[str], optional): '+' for benefit, '-' for cost criterion
+    Triển khai phương pháp TOPSIS (Technique for Order of Preference by Similarity
+    to Ideal Solution) kết hợp với phương pháp Entropy để xác định trọng số.
     """
-    
-    def __init__(self, df: pd.DataFrame, cols: List[str], 
-                 weights: List[float] = None, impacts: List[str] = None):
-        self.df = df.copy()
-        self.cols = cols
-        self.n_criteria = len(cols)
-        
-        # Set default weights (equal weights)
-        if weights is None:
-            self.weights = np.array([1/self.n_criteria] * self.n_criteria)
-        else:
-            if not np.isclose(sum(weights), 1.0):
-                raise ValueError("Weights must sum to 1.0")
-            self.weights = np.array(weights)
-        
-        # Set default impacts (all benefit)
-        if impacts is None:
-            self.impacts = ['+'] * self.n_criteria
-        else:
-            if len(impacts) != self.n_criteria:
-                raise ValueError(f"Number of impacts must match number of criteria ({self.n_criteria})")
-            self.impacts = impacts
-        
-        self.normalized_matrix = None
-        self.weighted_matrix = None
-        self.ideal_best = None
-        self.ideal_worst = None
-        self.scores = None
-        self.rankings = None
-        
-    def set_weights(self, weights: List[float]):
+
+    def __init__(self, df, criteria_types):
         """
-        Set weights for criteria.
-        
+        Khởi tạo đối tượng TOPSIS.
+
         Args:
-            weights (List[float]): List of weights (must sum to 1)
+            df (pd.DataFrame): DataFrame dữ liệu, với các phương án (hàng)
+                               và các tiêu chí (cột).
+            criteria_types (dict): Từ điển xác định hướng của tiêu chí.
+                                   Key là tên tiêu chí (str),
+                                   Value là 'max' (lợi ích) hoặc 'min' (chi phí).
         """
-        if not np.isclose(sum(weights), 1.0):
-            raise ValueError("Weights must sum to 1.0")
-        self.weights = np.array(weights)
-        
-    def set_impacts(self, impacts: List[str]):
+        self.df = df.astype(float)
+        self.criteria_types = criteria_types
+
+        self.norm_df = None
+        self.weights = None
+        self.weighted_norm = None
+        self.Ci_df = None
+
+    def normalize(self):
         """
-        Set impacts for criteria.
-        
-        Args:
-            impacts (List[str]): List of '+' (benefit) or '-' (cost)
-        """
-        if len(impacts) != self.n_criteria:
-            raise ValueError(f"Number of impacts must match number of criteria ({self.n_criteria})")
-        self.impacts = impacts
-        
-    def normalize(self, method: Literal['vector', 'minmax'] = 'vector') -> pd.DataFrame:
-        """
-        Normalize the decision matrix.
-        
-        Args:
-            method (str): 'vector' for vector normalization, 'minmax' for min-max normalization
-            
+        Chuẩn hóa ma trận quyết định theo chuẩn Euclid (Vector Normalization).
+
+        Công thức: $r_{ij} = x_{ij} / \sqrt{\sum_{i=1}^{m} x_{ij}^2}$
+        Kết quả được lưu vào `self.norm_df`.
+
         Returns:
-            pd.DataFrame: Normalized matrix
+            pd.DataFrame: DataFrame đã được chuẩn hóa.
         """
-        matrix = self.df[self.cols].values
-        
-        if method == 'vector':
-            # Vector normalization (standard TOPSIS)
-            norm = np.sqrt(np.sum(matrix**2, axis=0))
-            self.normalized_matrix = matrix / norm
-        elif method == 'minmax':
-            # Min-max normalization
-            min_vals = matrix.min(axis=0)
-            max_vals = matrix.max(axis=0)
-            self.normalized_matrix = (matrix - min_vals) / (max_vals - min_vals)
-        else:
-            raise ValueError("Method must be 'vector' or 'minmax'")
-        
-        return pd.DataFrame(self.normalized_matrix, columns=self.cols)
-    
-    def apply_weights(self) -> pd.DataFrame:
+        norm_df = pd.DataFrame()
+        for col in self.df.columns:
+            denom = np.sqrt((self.df[col] ** 2).sum())
+            norm_df[col] = self.df[col] / denom if denom != 0 else 0
+        self.norm_df = norm_df
+        return norm_df
+
+    def calculate_entropy_weights(self):
         """
-        Apply weights to normalized matrix.
-        
+        Tính trọng số khách quan của các tiêu chí bằng phương pháp Entropy.
+
+        Kết quả được lưu vào `self.weights`.
+
         Returns:
-            pd.DataFrame: Weighted normalized matrix
+            pd.Series: Series chứa trọng số của mỗi tiêu chí.
+
+        Raises:
+            Exception: Nếu dữ liệu chưa được chuẩn hóa (chưa chạy `normalize()`).
         """
-        if self.normalized_matrix is None:
+        if self.norm_df is None:
+            raise Exception(
+                "Phải chuẩn hóa dữ liệu (normalize) trước khi tính trọng số."
+            )
+
+        # Tính pij (phân bố xác suất)
+        pij = self.norm_df.div(self.norm_df.sum(axis=0), axis=1).replace(0, 1e-12)
+        m = self.norm_df.shape[0]
+        Ej = (-1 / np.log(m) * (pij * np.log(pij)).sum(axis=0)).values
+        Gj = 1 - Ej
+        aj = Gj / Gj.sum()
+        self.weights = pd.Series(aj, index=self.norm_df.columns)
+        return self.weights
+
+    def weighted_normalize(self):
+        """
+        Tạo ma trận quyết định chuẩn hóa có trọng số.
+
+        Nhân ma trận chuẩn hóa ($r_{ij}$) với trọng số Entropy ($w_j$).
+        Công thức: $v_{ij} = r_{ij} \times w_j$
+        Kết quả được lưu vào `self.weighted_norm`.
+
+        Returns:
+            pd.DataFrame: DataFrame chuẩn hóa đã nhân trọng số.
+
+        Raises:
+            Exception: Nếu chưa chuẩn hóa hoặc chưa tính trọng số.
+        """
+        if self.norm_df is None or self.weights is None:
+            raise Exception("Phải chuẩn hóa và tính trọng số trước.")
+        weighted_norm = self.norm_df * self.weights
+        self.weighted_norm = weighted_norm
+        return weighted_norm
+
+    def calculate_Ci_and_ranking(self):
+        """
+        Tính hệ số gần với giải pháp lý tưởng ($C_i$) và xếp hạng các phương án.
+
+        Xác định giải pháp lý tưởng (PIS, $A^+$) và phi lý tưởng (NIS, $A^-$),
+        tính khoảng cách ($D^+, D^-$) và cuối cùng là điểm $C_i$.
+        Công thức: $C_i = D_i^- / (D_i^+ + D_i^-)$
+        Kết quả được lưu vào `self.Ci_df`.
+
+        Returns:
+            pd.DataFrame: DataFrame chứa cột 'Ci' (điểm) và 'Ranking' (thứ hạng),
+                          đã được sắp xếp theo thứ hạng.
+
+        Raises:
+            Exception: Nếu chưa tính ma trận chuẩn hóa trọng số.
+        """
+        if self.weighted_norm is None:
+            raise Exception("Phải tính ma trận chuẩn hóa trọng số trước.")
+
+        weighted_norm = self.weighted_norm
+
+        J_plus = [c for c, t in self.criteria_types.items() if t == "max"]
+        J_minus = [c for c, t in self.criteria_types.items() if t == "min"]
+
+        A_plus = pd.Series(
+            {
+                col: (
+                    weighted_norm[col].max()
+                    if col in J_plus
+                    else weighted_norm[col].min()
+                )
+                for col in weighted_norm.columns
+            }
+        )
+        A_minus = pd.Series(
+            {
+                col: (
+                    weighted_norm[col].min()
+                    if col in J_plus
+                    else weighted_norm[col].max()
+                )
+                for col in weighted_norm.columns
+            }
+        )
+
+        D_plus = np.sqrt(((weighted_norm - A_plus) ** 2).sum(axis=1))
+        D_minus = np.sqrt(((weighted_norm - A_minus) ** 2).sum(axis=1))
+
+        Ci = D_minus / (D_plus + D_minus)
+        rank = Ci.rank(ascending=False, method="min").astype(int)
+
+        self.Ci_df = pd.DataFrame({"Ci": Ci, "Ranking": rank}).sort_values(
+            by="Ci", ascending=False
+        )
+        return self.Ci_df
+
+    # Các hàm in kết quả theo yêu cầu (có thể gọi riêng biệt)
+    def print_normalization(self):
+        """In ma trận quyết định đã chuẩn hóa."""
+        if self.norm_df is None:
             self.normalize()
-        
-        self.weighted_matrix = self.normalized_matrix * self.weights
-        return pd.DataFrame(self.weighted_matrix, columns=self.cols)
-    
-    def calculate_ideal_solutions(self):
-        """
-        Calculate ideal best and ideal worst solutions.
-        """
-        if self.weighted_matrix is None:
-            self.apply_weights()
-        
-        self.ideal_best = np.zeros(self.n_criteria)
-        self.ideal_worst = np.zeros(self.n_criteria)
-        
-        for i, impact in enumerate(self.impacts):
-            if impact == '+':
-                # Benefit criterion
-                self.ideal_best[i] = self.weighted_matrix[:, i].max()
-                self.ideal_worst[i] = self.weighted_matrix[:, i].min()
-            else:
-                # Cost criterion
-                self.ideal_best[i] = self.weighted_matrix[:, i].min()
-                self.ideal_worst[i] = self.weighted_matrix[:, i].max()
-    
-    def calculate_distances(self) -> tuple:
-        """
-        Calculate distances from ideal best and ideal worst solutions.
-        
-        Returns:
-            tuple: (distance_to_best, distance_to_worst)
-        """
-        if self.ideal_best is None or self.ideal_worst is None:
-            self.calculate_ideal_solutions()
-        
-        # Euclidean distance
-        distance_to_best = np.sqrt(np.sum((self.weighted_matrix - self.ideal_best)**2, axis=1))
-        distance_to_worst = np.sqrt(np.sum((self.weighted_matrix - self.ideal_worst)**2, axis=1))
-        
-        return distance_to_best, distance_to_worst
-    
-    def calculate_scores(self) -> pd.Series:
-        """
-        Calculate TOPSIS scores (closeness coefficient).
-        
-        Returns:
-            pd.Series: TOPSIS scores for each alternative
-        """
-        dist_best, dist_worst = self.calculate_distances()
-        
-        # Closeness coefficient
-        self.scores = dist_worst / (dist_best + dist_worst)
-        
-        return pd.Series(self.scores, name='TOPSIS_Score')
-    
-    def get_rankings(self) -> pd.DataFrame:
-        """
-        Get rankings based on TOPSIS scores.
-        
-        Returns:
-            pd.DataFrame: Rankings with scores
-        """
-        if self.scores is None:
-            self.calculate_scores()
-        
-        rankings_df = pd.DataFrame({
-            'TOPSIS_Score': self.scores,
-            'Rank': pd.Series(self.scores).rank(ascending=False, method='dense').astype(int)
-        })
-        
-        self.rankings = rankings_df.sort_values('Rank')
-        return self.rankings
-    
-    def get_solution(self, target_col: str = None) -> pd.DataFrame:
-        """
-        Get complete solution with original data, scores, and rankings.
-        
-        Args:
-            target_col (str, optional): Target column to include in results
-            
-        Returns:
-            pd.DataFrame: Complete solution dataframe
-        """
-        if self.scores is None:
-            self.calculate_scores()
-        
-        result_df = self.df.copy()
-        result_df['TOPSIS_Score'] = self.scores
-        result_df['Rank'] = pd.Series(self.scores).rank(ascending=False, method='dense').astype(int)
-        
-        if target_col and target_col in self.df.columns:
-            cols_order = [target_col] + self.cols + ['TOPSIS_Score', 'Rank']
-            result_df = result_df[cols_order]
-        else:
-            cols_order = self.cols + ['TOPSIS_Score', 'Rank']
-            result_df = result_df[cols_order]
-        
-        return result_df.sort_values('Rank')
-    
-    def get_normalized_matrix(self) -> pd.DataFrame:
-        """
-        Get the normalized decision matrix.
-        
-        Returns:
-            pd.DataFrame: Normalized matrix
-        """
-        if self.normalized_matrix is None:
-            self.normalize()
-        return pd.DataFrame(self.normalized_matrix, columns=self.cols)
-    
-    def get_weighted_matrix(self) -> pd.DataFrame:
-        """
-        Get the weighted normalized matrix.
-        
-        Returns:
-            pd.DataFrame: Weighted normalized matrix
-        """
-        if self.weighted_matrix is None:
-            self.apply_weights()
-        return pd.DataFrame(self.weighted_matrix, columns=self.cols)
-    
-    def get_ideal_solutions(self) -> pd.DataFrame:
-        """
-        Get ideal best and worst solutions.
-        
-        Returns:
-            pd.DataFrame: DataFrame with ideal solutions
-        """
-        if self.ideal_best is None or self.ideal_worst is None:
-            self.calculate_ideal_solutions()
-        
-        return pd.DataFrame({
-            'Criterion': self.cols,
-            'Weight': self.weights,
-            'Impact': self.impacts,
-            'Ideal_Best': self.ideal_best,
-            'Ideal_Worst': self.ideal_worst
-        })
-    
-    def print_summary(self):
-        """
-        Print comprehensive summary of TOPSIS analysis.
-        """
-        print("=" * 80)
-        print("TOPSIS ANALYSIS SUMMARY")
-        print("=" * 80)
-        
-        print(f"\n📊 Criteria Information:")
-        print(f"   Number of criteria: {self.n_criteria}")
-        print(f"   Criteria: {', '.join(self.cols)}")
-        
-        print(f"\n⚖️  Weights and Impacts:")
-        weights_df = pd.DataFrame({
-            'Criterion': self.cols,
-            'Weight': self.weights,
-            'Impact': self.impacts
-        })
-        print(weights_df.to_string(index=False))
-        
-        print(f"\nIdeal Solutions:")
-        ideal_df = self.get_ideal_solutions()
-        print(ideal_df.to_string(index=False))
-        
-        print(f"\nTop 5 Rankings:")
-        rankings = self.get_rankings().head()
-        print(rankings.to_string())
-        
-        print("\n" + "=" * 80)
+        print("Ma trận quyết định sau khi chuẩn hóa:")
+        print(self.norm_df)
+
+    def print_entropy_weights(self):
+        """In trọng số các tiêu chí theo Entropy."""
+        if self.weights is None:
+            self.calculate_entropy_weights()
+        print("Trọng số các tiêu chí theo Entropy:")
+        print(self.weights)
+
+    def print_weighted_normalize(self):
+        """In ma trận chuẩn hóa có trọng số."""
+        if self.weighted_norm is None:
+            self.weighted_normalize()
+        print("Ma trận chuẩn hóa có trọng số:")
+        print(self.weighted_norm)
+
+    def print_Ci_ranking(self):
+        """In bảng kết quả Ci và xếp hạng cuối cùng."""
+        if self.Ci_df is None:
+            self.calculate_Ci_and_ranking()
+        print("Bảng kết quả Ci và xếp hạng:")
+        print(self.Ci_df)
